@@ -7,7 +7,7 @@ import os
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="EPIGUARD: Automated Epilepsy Detection and Multi-Modal Alerting System",
+    page_title="EPIGUARD: Automated Epilepsy Detection and Multi-Model Alerting System",
     page_icon="🚨",
     layout="wide"
 )
@@ -64,7 +64,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="hero-title">🚨 EPIGUARD: Automated Epilepsy Detection and Multi-Modal Alerting System</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">🚨 EPIGUARD: Automated Epilepsy Detection and Multi-Model Alerting System</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-subtitle">Single Buzzer-low frequency seizure detected • Multi-Frequency Siren- high frequency seizure detected</div>', unsafe_allow_html=True)
 
 # 1. Load Model & Scaler
