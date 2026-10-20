@@ -2,12 +2,20 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 import joblib
+
+# Dynamically resolve root path
+BASE_DIR = Path(__file__).resolve().parent
+
+# Load models safely
+model = joblib.load(BASE_DIR / 'random_forest_eeg_model.pkl')
+scaler = joblib.load(BASE_DIR / 'scaler.pkl')
 import os
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="EPIGUARD: Automated Epilepsy Detection and Multi-Model Alerting System",
+    page_title="EPIGUARD: Automated Epilepsy Detection and Alerting System",
     page_icon="🚨",
     layout="wide"
 )
@@ -64,8 +72,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="hero-title">🚨 EPIGUARD: Automated Epilepsy Detection and Multi-Model Alerting System</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-subtitle">Single Buzzer-low frequency seizure detected • Multi-Frequency Siren- high frequency seizure detected</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">🚨 EPIGUARD: Automated Epilepsy Detection and Alerting System</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-subtitle">Single Buzzer: Mild Seizure Detected • Multi-Frequency Siren: Critical Seizure Detected</div>', unsafe_allow_html=True)
 
 # 1. Load Model & Scaler
 @st.cache_resource
@@ -146,11 +154,11 @@ def parse_eeg_input(df):
 # SIDEBAR CONTROLS
 st.sidebar.header("📋 EPIGUARD: Stream Source")
 enable_buzzer = st.sidebar.checkbox("🔊 Enable Audio Buzzer", value=True)
-monitoring_mode = st.sidebar.radio("Input Source:", ["Preset Monitoring Scenarios (4 Stages)", "Upload Live EEG CSV"])
+monitoring_mode = st.sidebar.radio("Input Source:", ["Preset Scenarios (Normal, Mild, Critical)", "Upload Live EEG CSV"])
 
 seconds_data_list = []
 
-if monitoring_mode == "Preset Monitoring Scenarios (4 Stages)":
+if monitoring_mode == "Preset Scenarios (Normal, Mild, Critical)":
     raw_csv = 'dataset_extracted/Epileptic Seizure Recognition.csv'
     if not os.path.exists(raw_csv):
         raw_csv = 'data/Epileptic Seizure Recognition.csv'
@@ -160,36 +168,26 @@ if monitoring_mode == "Preset Monitoring Scenarios (4 Stages)":
     raw_df['chunk_num'] = raw_df['Unnamed'].apply(lambda s: int(s.split('.')[0].replace('X', '')) if isinstance(s, str) and '.' in s else 1)
     raw_df['patient_id'] = raw_df['Unnamed'].apply(lambda s: s.split('.')[-1] if isinstance(s, str) and '.' in s else 'Unknown')
     
-    choice = st.sidebar.selectbox("Simulate Monitoring Condition:", [
-        "Stage 1: Healthy Adult #1 (Relaxed Eyes-Closed Baseline -> Normal Green)",
-        "Stage 2: Healthy Adult #2 (Alert Eyes-Open Baseline -> Normal Green)",
-        "Stage 3: User with Mild Seizures (Frequency ≤ 5 -> Orange Alert, Single Buzzer)",
-        "Stage 4: Individual with Acute Seizure Attack (Frequency > 5 -> Critical Red Alert, Multi-Freq Siren)"
+    choice = st.sidebar.selectbox("Simulate Condition:", [
+        "Normal (Baseline Rhythm -> Normal Green)",
+        "Mild Seizure (Spike Frequency ≤ 5s -> Orange Alert, Single Buzzer)",
+        "Critical Seizure (Prolonged Frequency > 5s -> Red Emergency, Multi-Freq Siren)"
     ])
     
-    # Ultra-clean healthy patient baselines (0% false positives across all 23 seconds)
-    normal_stage1 = raw_df[raw_df['patient_id'] == '541'].sort_values('chunk_num').reset_index(drop=True)
-    if len(normal_stage1) == 0:
-        normal_stage1 = raw_df[raw_df['patient_id'] == '1'].sort_values('chunk_num').reset_index(drop=True)
-        
-    normal_stage2 = raw_df[raw_df['patient_id'] == '72'].sort_values('chunk_num').reset_index(drop=True)
-    if len(normal_stage2) == 0:
-        normal_stage2 = raw_df[raw_df['patient_id'] == '8'].sort_values('chunk_num').reset_index(drop=True)
+    normal_baseline = raw_df[raw_df['patient_id'] == '541'].sort_values('chunk_num').reset_index(drop=True)
+    if len(normal_baseline) == 0:
+        normal_baseline = raw_df[raw_df['patient_id'] == '1'].sort_values('chunk_num').reset_index(drop=True)
         
     seizure_stream = raw_df[raw_df['patient_id'] == '924'].sort_values('chunk_num').reset_index(drop=True)
     
-    if "Stage 1:" in choice:
-        patient_stream = normal_stage1.copy()
-    elif "Stage 2:" in choice:
-        patient_stream = normal_stage2.copy()
-    elif "Stage 3:" in choice:
-        # 3 isolated seizure seconds (Frequency = 3 <= 5) -> Triggers Stage 3 Orange Alert
-        patient_stream = normal_stage1.copy()
-        patient_stream.iloc[8] = seizure_pool.iloc[0] if 'seizure_pool' in locals() else seizure_stream.iloc[0]
-        patient_stream.iloc[9] = seizure_pool.iloc[1] if 'seizure_pool' in locals() else seizure_stream.iloc[1]
-        patient_stream.iloc[10] = seizure_pool.iloc[2] if 'seizure_pool' in locals() else seizure_stream.iloc[2]
+    if "Normal" in choice:
+        patient_stream = normal_baseline.copy()
+    elif "Mild Seizure" in choice:
+        patient_stream = normal_baseline.copy()
+        patient_stream.iloc[8] = seizure_stream.iloc[0]
+        patient_stream.iloc[9] = seizure_stream.iloc[1]
+        patient_stream.iloc[10] = seizure_stream.iloc[2]
     else:
-        # Full seizure stream (Frequency = 23 > 5) -> Triggers Stage 4 Critical Red Alert
         patient_stream = seizure_stream.copy()
     
     feat_cols = [f'X{i}' for i in range(1, 179)]
@@ -245,8 +243,8 @@ else:
         st.info("👈 Please upload a CSV file in the sidebar, or select a preset record above.")
         st.stop()
 
-# Real-Time Second-by-Second Analysis with Spinner
-with st.spinner("🧠 EEG edge classifier processing EEG telemetry..."):
+# Real-Time Second-by-Second Analysis
+with st.spinner("🧠 EEG edge classifier processing telemetry..."):
     total_seconds = len(seconds_data_list)
     timeline_results = []
     
@@ -286,10 +284,10 @@ else:
     start_time_str = "None"
     end_time_str = "None"
 
-# AUDIO BUZZER INJECTION: SINGLE BUZZER (STAGE 3) vs MULTI-FREQUENCY RAPID SIREN (STAGE 4)
+# AUDIO BUZZER INJECTION: SINGLE BUZZER (MILD) vs MULTI-FREQUENCY RAPID SIREN (CRITICAL)
 if enable_buzzer:
     if 1 <= seizure_freq <= 5:
-        # STAGE 3: SINGLE BEEP / SINGLE BUZZER TONE (750 Hz)
+        # MILD: SINGLE BUZZER TONE (750 Hz)
         single_buzzer_js = """
         <script>
         try {
@@ -314,7 +312,7 @@ if enable_buzzer:
         components.html(single_buzzer_js, height=0, width=0)
 
     elif seizure_freq > 5:
-        # STAGE 4: MULTIPLE HIGH-FREQUENCY PIERCING SIREN BURSTS (1800 Hz to 3200 Hz)
+        # CRITICAL: MULTIPLE HIGH-FREQUENCY PIERCING SIREN BURSTS (1800 Hz to 3200 Hz)
         multi_buzzer_js = """
         <script>
         try {
@@ -326,7 +324,6 @@ if enable_buzzer:
                 var gain = ctx.createGain();
                 osc.type = 'sawtooth';
                 
-                // Rapid high-frequency pitch oscillation (1800 Hz -> 3200 Hz -> 1800 Hz)
                 osc.frequency.setValueAtTime(baseFreq, startTime);
                 osc.frequency.linearRampToValueAtTime(peakFreq, startTime + duration * 0.5);
                 osc.frequency.linearRampToValueAtTime(baseFreq, startTime + duration);
@@ -342,7 +339,6 @@ if enable_buzzer:
             }
             
             var now = ctx.currentTime;
-            // Multiple rapid high-pitch warning bursts in critical emergency
             for (var i = 0; i < 6; i++) {
                 playPiercingChirp(now + (i * 0.30), 1800, 3200, 0.26);
             }
@@ -353,19 +349,19 @@ if enable_buzzer:
         """
         components.html(multi_buzzer_js, height=0, width=0)
 
-# DYNAMIC MULTI-MODAL ALARM BANNER (GREEN / ORANGE <= 5 / CRITICAL RED > 5)
+# DYNAMIC ALARM BANNER (NORMAL / MILD / CRITICAL)
 if seizure_freq == 0:
     st.markdown("""
     <div class="status-card status-normal-green">
-        <h2 style="margin: 0; color: #166534;">🟢 MONITORED STATUS: NORMAL & SAFE </h2>
+        <h2 style="margin: 0; color: #166534;">🟢 STATUS: NORMAL</h2>
         <p style="font-size: 17px; margin: 8px 0px;">
-            The monitored individual is in a stable physiological rhythm. No seizure patterns detected.
+            The monitored individual is in a stable physiological rhythm. No seizure activity detected.
         </p>
         <hr style="border: 0; border-top: 1px solid #86EFAC;">
         <span style="font-size: 15px;">
             🛡️ <b>Audio Buzzer:</b> Silent / Standby &nbsp;|&nbsp; 
             💡 <b>Device LED Indicator:</b> Steady Green &nbsp;|&nbsp; 
-            🩺 <b>Clinical State:</b> Safe baseline rhythm.
+            🩺 <b>Clinical State:</b> Normal baseline rhythm.
         </span>
     </div>
     """, unsafe_allow_html=True)
@@ -373,15 +369,15 @@ if seizure_freq == 0:
 elif 1 <= seizure_freq <= 5:
     st.markdown(f"""
     <div class="status-card status-alert-orange">
-        <h2 style="margin: 0; color: #C2410C;">⚠️ MONITORED STATUS: MILD / INTERMITTENT SEIZURE (FREQUENCY: {seizure_freq}s)</h2>
+        <h2 style="margin: 0; color: #C2410C;">⚠️ STATUS: MILD SEIZURE ALERT (SPIKES: {seizure_freq}s)</h2>
         <p style="font-size: 18px; margin: 8px 0px;">
-            <b>ATTENTION SURROUNDING:</b> The monitored individual has registered <b>{seizure_freq} seizure spikes (≤ 5)</b> between <b>{start_time_str}</b> and <b>{end_time_str}</b>.
+            <b>ATTENTION:</b> Mild intermittent seizure activity detected (<b>{seizure_freq} spikes ≤ 5s</b>) between <b>{start_time_str}</b> and <b>{end_time_str}</b>.
         </p>
         <hr style="border: 0; border-top: 1px solid #FDBA74;">
         <span style="font-size: 16px;">
-            🔔 <b>Audio Alarm:</b> Single Buzzer Tone Emitted (750 Hz) &nbsp;|&nbsp; 
+            🔔 <b>Audio Alarm:</b> Single Buzzer Tone (750 Hz) &nbsp;|&nbsp; 
             💡 <b>LED Beacon:</b> Pulsing Amber/Orange &nbsp;|&nbsp; 
-            ⚠️ <b>Instructions:</b> Ask the monitored person to sit down in a safe location. Monitor closely.
+            ⚠️ <b>Instructions:</b> Ask the monitored person to sit down in a safe position and monitor closely.
         </span>
     </div>
     """, unsafe_allow_html=True)
@@ -389,22 +385,22 @@ elif 1 <= seizure_freq <= 5:
 else:
     st.markdown(f"""
     <div class="status-card status-critical-red">
-        <h1 style="margin: 0; font-size: 26px; color: #991B1B;">🚨 MONITORED STATUS: SEIZURE IN PROGRESS! NEED HELP!</h1>
+        <h1 style="margin: 0; font-size: 26px; color: #991B1B;">🚨 STATUS: CRITICAL SEIZURE EMERGENCY!</h1>
         <p style="font-size: 20px; font-weight: bold; margin: 10px 0px;">
-            PROLONGED ACUTE EPILEPTIC SEIZURE DETECTED ({seizure_freq}s) FROM {start_time_str} TO {end_time_str}!
+            PROLONGED ACUTE SEIZURE DETECTED ({seizure_freq}s) FROM {start_time_str} TO {end_time_str}!
         </p>
         <hr style="border: 0; border-top: 2px solid #FCA5A5;">
         <span style="font-size: 17px;">
-            🔊 <b>Audio Alarm:</b> Multiple High-Frequency Piercing Siren Active (1800 Hz – 3200 Hz) &nbsp;|&nbsp; 
+            🔊 <b>Audio Alarm:</b> Multi-Frequency High-Pitch Siren Active (1800 Hz – 3200 Hz) &nbsp;|&nbsp; 
             ⏱️ <b>Seizure Active Time:</b> {seizure_freq} Total Seconds
         </span>
     </div>
     """, unsafe_allow_html=True)
 
-    # BYSTANDER FIRST AID AID CARD
+    # Bystander First Aid Card
     st.markdown("""
     <div class="bystander-box">
-        <h3 style="margin-top: 0; color: #DC2626;">🆘 INSTRUCTIONS FOR SURROUNDING BYSTANDERS / CITIZENS:</h3>
+        <h3 style="margin-top: 0; color: #DC2626;">🆘 INSTRUCTIONS FOR SURROUNDING BYSTANDERS:</h3>
         <table style="width: 100%; font-size: 15px; border-collapse: collapse;">
             <tr style="border-bottom: 1px solid #E5E7EB;">
                 <td style="padding: 8px; width: 50%; color: #166534; font-weight: bold;">✅ DO THIS IMMEDIATELY:</td>
@@ -412,17 +408,17 @@ else:
             </tr>
             <tr>
                 <td style="padding: 8px; vertical-align: top;">
-                    • Protect their head with something soft (folded jacket, bag).<br>
-                    • Gently guide them onto their side (recovery position) to aid breathing.<br>
-                    • Clear away sharp objects, stairs, or heavy furniture.<br>
+                    • Cushion their head with something soft (jacket, bag).<br>
+                    • Gently roll them onto their side (recovery position) to keep airway clear.<br>
+                    • Move hard, sharp, or hot objects away.<br>
                     • Call Emergency Services (<b>108 / 112</b>) if seizure lasts &gt; 5 minutes.<br>
-                    • Stay calm and remain with them until fully conscious.
+                    • Stay calm and remain with them until fully awake.
                 </td>
                 <td style="padding: 8px; vertical-align: top;">
                     • <b>DO NOT</b> put anything into their mouth.<br>
-                    • <b>DO NOT</b> restrain them or hold their limbs down.<br>
-                    • <b>DO NOT</b> attempt to give water, pills, or food.<br>
-                    • <b>DO NOT</b> crowd the person; allow plenty of fresh air.
+                    • <b>DO NOT</b> restrain their limbs or hold them down.<br>
+                    • <b>DO NOT</b> offer water, food, or medication until alert.<br>
+                    • <b>DO NOT</b> crowd the area; allow sufficient air.
                 </td>
             </tr>
         </table>
@@ -431,35 +427,35 @@ else:
 
 # SUMMARY METRIC TILES
 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-mcol1.metric("Telemetry Stream Window", f"{total_seconds} Seconds")
-mcol2.metric("Seizure Onset Time", start_time_str)
-mcol3.metric("Last Spike Time", end_time_str)
+mcol1.metric("Telemetry Window", f"{total_seconds} Seconds")
+mcol2.metric("Seizure Onset", start_time_str)
+mcol3.metric("Last Spike", end_time_str)
 mcol4.metric(
-    "Seizure Severity Frequency",
-    f"{seizure_freq} Seconds",
-    delta=f"{'🚨 Stage 4 Critical Red' if seizure_freq > 5 else ('⚠️ Stage 3 Orange Alert' if seizure_freq > 0 else '🟢 Normal Green')}"
+    "Current Classification",
+    "Critical Seizure" if seizure_freq > 5 else ("Mild Seizure" if seizure_freq > 0 else "Normal"),
+    delta=f"{seizure_freq}s spike total" if seizure_freq > 0 else "Stable"
 )
 
 st.divider()
 
 # SECOND-BY-SECOND ACTIVITY BAR
-st.subheader("📊 Second-by-Second Real-Time Edge Telemetry")
+st.subheader("📊 Second-by-Second Telemetry Timeline")
 display_blocks = min(total_seconds, 25)
 bar_cols = st.columns(display_blocks)
 for idx in range(display_blocks):
     row_data = timeline_df.iloc[idx]
     if row_data['is_seizure'] == 1:
         if seizure_freq <= 5:
-            bar_cols[idx].markdown(f"<div style='background-color:#F97316; color:white; border-radius:6px; padding:8px 2px; text-align:center; font-weight:bold; font-size:12px;'>⚠️ {row_data['second']}s<br>STAGE 3</div>", unsafe_allow_html=True)
+            bar_cols[idx].markdown(f"<div style='background-color:#F97316; color:white; border-radius:6px; padding:8px 2px; text-align:center; font-weight:bold; font-size:12px;'>⚠️ {row_data['second']}s<br>MILD</div>", unsafe_allow_html=True)
         else:
-            bar_cols[idx].markdown(f"<div style='background-color:#EF4444; color:white; border-radius:6px; padding:8px 2px; text-align:center; font-weight:bold; font-size:12px;'>🚨 {row_data['second']}s<br>STAGE 4</div>", unsafe_allow_html=True)
+            bar_cols[idx].markdown(f"<div style='background-color:#EF4444; color:white; border-radius:6px; padding:8px 2px; text-align:center; font-weight:bold; font-size:12px;'>🚨 {row_data['second']}s<br>CRITICAL</div>", unsafe_allow_html=True)
     else:
         bar_cols[idx].markdown(f"<div style='background-color:#22C55E; color:white; border-radius:6px; padding:8px 2px; text-align:center; font-weight:bold; font-size:12px;'>✓ {row_data['second']}s<br>NORMAL</div>", unsafe_allow_html=True)
 
 st.write("")
 
 # CONTINUOUS WAVEFORM VISUALIZATION
-st.subheader("📈 Patient EEG Continuous Voltage Waveform with Alert Zone")
+st.subheader("📈 Patient Continuous EEG Waveform")
 full_waveform = np.concatenate([t['raw_wave'] for t in timeline_results])
 time_axis_seconds = np.linspace(0, total_seconds, len(full_waveform))
 
@@ -469,15 +465,15 @@ ax.plot(time_axis_seconds, full_waveform, color="#2563EB", linewidth=1.2, label=
 if 1 <= seizure_freq <= 5:
     for idx, t in enumerate(timeline_results):
         if t['is_seizure'] == 1:
-            ax.axvspan(idx, idx + 1, color="#FB923C", alpha=0.45, label="Stage 3 Orange Caution Zone (≤ 5)" if idx == (start_time_sec - 1) else "")
+            ax.axvspan(idx, idx + 1, color="#FB923C", alpha=0.45, label="Mild Seizure Zone" if idx == (start_time_sec - 1) else "")
 elif seizure_freq > 5:
     for idx, t in enumerate(timeline_results):
         if t['is_seizure'] == 1:
-            ax.axvspan(idx, idx + 1, color="#EF4444", alpha=0.35, label="Stage 4 Critical Red Seizure Attack (> 5)" if idx == (start_time_sec - 1) else "")
+            ax.axvspan(idx, idx + 1, color="#EF4444", alpha=0.35, label="Critical Seizure Zone" if idx == (start_time_sec - 1) else "")
 
 ax.set_xlabel("Recording Timeline (Seconds)", fontsize=11, fontweight='bold')
 ax.set_ylabel("Voltage Amplitude (μV)", fontsize=11, fontweight='bold')
-ax.set_title("EEG Stream (Shaded Zone Triggers Physical Alarms for Bystanders)", fontsize=12, fontweight='bold')
+ax.set_title("EEG Stream with Dynamic Alert Zones", fontsize=12, fontweight='bold')
 ax.grid(True, linestyle="--", alpha=0.5)
 ax.set_xlim(0, total_seconds)
 ax.legend(loc="upper right")
@@ -485,10 +481,10 @@ st.pyplot(fig)
 
 st.divider()
 
-# SECOND-BY-SECOND DRILL DOWN SLIDER
-st.subheader("🔍 Inspect Specific Second of Individual Telemetry")
+# SECOND-BY-SECOND INSPECTION
+st.subheader("🔍 Inspect Specific Second of Telemetry")
 default_slider_val = start_time_sec if seizure_freq > 0 else 1
-selected_sec = st.slider("Select Second to Inspect Detail:", min_value=1, max_value=max(total_seconds, 1), value=min(default_slider_val, total_seconds))
+selected_sec = st.slider("Select Second:", min_value=1, max_value=max(total_seconds, 1), value=min(default_slider_val, total_seconds))
 sec_info = timeline_df.iloc[selected_sec - 1]
 
 dcol1, dcol2 = st.columns([2, 1])
@@ -498,7 +494,7 @@ with dcol1:
     wave_color = "#EA580C" if (seizure_freq <= 5 and sec_info['is_seizure'] == 1) else ("#DC2626" if sec_info['is_seizure'] == 1 else "#16A34A")
     ax_sec.plot(sec_info['raw_wave'], color=wave_color, linewidth=2.0)
     ax_sec.set_title(f"EEG Voltage Signature at Second {selected_sec} ({sec_info['time_label']})", fontsize=11, fontweight='bold')
-    ax_sec.set_xlabel("178 Discrete Samples @ 173.6 Hz")
+    ax_sec.set_xlabel("178 Samples @ 173.6 Hz")
     ax_sec.set_ylabel("Voltage (μV)")
     ax_sec.grid(True, linestyle="--", alpha=0.5)
     st.pyplot(fig_sec)
@@ -507,9 +503,9 @@ with dcol2:
     st.markdown(f"### Snapshot at Second {selected_sec}")
     if sec_info['is_seizure'] == 1:
         if seizure_freq <= 5:
-            st.warning(f"⚠️ **STATUS: STAGE 3 ORANGE ALERT (FREQUENCY ≤ 5)**\n\n**Spike Probability:** {sec_info['seizure_prob']*100:.1f}%\n\nBuzzer: Single beep tone active.")
+            st.warning(f"⚠️ **STATUS: MILD SEIZURE**\n\n**Spike Confidence:** {sec_info['seizure_prob']*100:.1f}%\n\nBuzzer: Single 750 Hz tone active.")
         else:
-            st.error(f"🚨 **STATUS: STAGE 4 CRITICAL RED EMERGENCY (FREQUENCY > 5)**\n\n**Seizure Risk:** {sec_info['seizure_prob']*100:.1f}%\n\nBuzzer: Multiple High-Frequency Rapid Siren Sweeps Active (1800–3200 Hz).")
+            st.error(f"🚨 **STATUS: CRITICAL SEIZURE**\n\n**Seizure Risk:** {sec_info['seizure_prob']*100:.1f}%\n\nBuzzer: Rapid Siren Sweeps (1800–3200 Hz).")
     else:
-        st.success(f"✅ **STATUS: NORMAL RHYTHM**\n\n**Confidence:** {sec_info['normal_prob']*100:.1f}%\n\nSystem is silent.")
+        st.success(f"✅ **STATUS: NORMAL**\n\n**Confidence:** {sec_info['normal_prob']*100:.1f}%\n\nSystem silent.")
     st.info(f"**Max Peak Voltage:** {sec_info['voltage_max']:.1f} μV\n\n**Lowest Valley:** {sec_info['voltage_min']:.1f} μV")
